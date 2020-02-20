@@ -400,7 +400,7 @@ class _CategoricalPlotter(object):
             ax.set_ylabel(ylabel)
 
         if self.orient == "v":
-            ax.set_xticks(np.arange(len(self.plot_data)))
+            ax.set_xticks(range(max(self.x_positions)))
             ax.set_xticklabels(self.group_names)
         else:
             ax.set_yticks(np.arange(len(self.plot_data)))
@@ -408,7 +408,7 @@ class _CategoricalPlotter(object):
 
         if self.orient == "v":
             ax.xaxis.grid(False)
-            ax.set_xlim(-.5, len(self.plot_data) - .5, auto=None)
+            ax.set_xlim(-.5, max(self.x_positions) - .5, auto=True)
         else:
             ax.yaxis.grid(False)
             ax.set_ylim(-.5, len(self.plot_data) - .5, auto=None)
@@ -552,13 +552,17 @@ class _BoxPlotter(_CategoricalPlotter):
 class _ViolinPlotter(_CategoricalPlotter):
 
     def __init__(self, x, y, hue, data, order, hue_order,
-                 bw, cut, scale, scale_hue, gridsize,
+                 x_positions, bw, cut, scale, scale_hue, gridsize,
                  width, inner, split, dodge, orient, linewidth,
-                 color, palette, saturation):
+                 outline, color, palette, saturation):
 
         self.establish_variables(x, y, hue, data, orient, order, hue_order)
         self.establish_colors(color, palette, saturation)
         self.estimate_densities(bw, cut, scale, scale_hue, gridsize)
+
+        if x_positions is None:
+            x_positions = range(len(self.plot_data))
+        self.x_positions = x_positions
 
         self.gridsize = gridsize
         self.width = width
@@ -581,6 +585,7 @@ class _ViolinPlotter(_CategoricalPlotter):
         if linewidth is None:
             linewidth = mpl.rcParams["lines.linewidth"]
         self.linewidth = linewidth
+        self.outline = outline
 
     def estimate_densities(self, bw, cut, scale, scale_hue, gridsize):
         """Find the support and density for all of the data."""
@@ -805,8 +810,13 @@ class _ViolinPlotter(_CategoricalPlotter):
         """Draw the violins onto `ax`."""
         fill_func = ax.fill_betweenx if self.orient == "v" else ax.fill_between
         for i, group_data in enumerate(self.plot_data):
+            x_position = self.x_positions[i]
+
 
             kws = dict(edgecolor=self.gray, linewidth=self.linewidth)
+            fill_kws = kws.copy()
+            if not self.outline:
+                fill_kws['linewidth'] = 0
 
             # Option 1: we have a single level of grouping
             # --------------------------------------------
@@ -823,16 +833,16 @@ class _ViolinPlotter(_CategoricalPlotter):
                 elif support.size == 1:
                     val = support.item()
                     d = density.item()
-                    self.draw_single_observation(ax, i, val, d)
+                    self.draw_single_observation(ax, x_position, val, d)
                     continue
 
                 # Draw the violin for this group
-                grid = np.ones(self.gridsize) * i
+                grid = np.ones(self.gridsize) * x_position
                 fill_func(support,
                           grid - density * self.dwidth,
                           grid + density * self.dwidth,
                           facecolor=self.colors[i],
-                          **kws)
+                          **fill_kws)
 
                 # Draw the interior representation of the data
                 if self.inner is None:
@@ -843,19 +853,19 @@ class _ViolinPlotter(_CategoricalPlotter):
 
                 # Draw box and whisker information
                 if self.inner.startswith("box"):
-                    self.draw_box_lines(ax, violin_data, support, density, i)
+                    self.draw_box_lines(ax, violin_data, support, density, x_position)
 
                 # Draw quartile lines
                 elif self.inner.startswith("quart"):
-                    self.draw_quartiles(ax, violin_data, support, density, i)
+                    self.draw_quartiles(ax, violin_data, support, density, x_position)
 
                 # Draw stick observations
                 elif self.inner.startswith("stick"):
-                    self.draw_stick_lines(ax, violin_data, support, density, i)
+                    self.draw_stick_lines(ax, violin_data, support, density, x_position)
 
                 # Draw point observations
                 elif self.inner.startswith("point"):
-                    self.draw_points(ax, violin_data, i)
+                    self.draw_points(ax, violin_data, x_position)
 
             # Option 2: we have nested grouping by a hue variable
             # ---------------------------------------------------
@@ -865,7 +875,7 @@ class _ViolinPlotter(_CategoricalPlotter):
                 for j, hue_level in enumerate(self.hue_names):
 
                     support, density = self.support[i][j], self.density[i][j]
-                    kws["facecolor"] = self.colors[j]
+                    fill_kws["facecolor"] = self.colors[j]
 
                     # Add legend data, but just for one set of violins
                     if not i:
@@ -881,7 +891,7 @@ class _ViolinPlotter(_CategoricalPlotter):
                         d = density.item()
                         if self.split:
                             d = d / 2
-                        at_group = i + offsets[j]
+                        at_group = x_position + offsets[j]
                         self.draw_single_observation(ax, at_group, val, d)
                         continue
 
@@ -890,17 +900,17 @@ class _ViolinPlotter(_CategoricalPlotter):
 
                     if self.split:
 
-                        grid = np.ones(self.gridsize) * i
+                        grid = np.ones(self.gridsize) * x_position
                         if j:
                             fill_func(support,
                                       grid,
                                       grid + density * self.dwidth,
-                                      **kws)
+                                      **fill_kws)
                         else:
                             fill_func(support,
                                       grid - density * self.dwidth,
                                       grid,
-                                      **kws)
+                                      **fill_kws)
 
                         # Draw the interior representation of the data
                         if self.inner is None:
@@ -913,13 +923,13 @@ class _ViolinPlotter(_CategoricalPlotter):
                         # Draw quartile lines
                         if self.inner.startswith("quart"):
                             self.draw_quartiles(ax, violin_data,
-                                                support, density, i,
+                                                support, density, x_position,
                                                 ["left", "right"][j])
 
                         # Draw stick observations
                         elif self.inner.startswith("stick"):
                             self.draw_stick_lines(ax, violin_data,
-                                                  support, density, i,
+                                                  support, density, x_position,
                                                   ["left", "right"][j])
 
                         # The box and point interior plots are drawn for
@@ -933,21 +943,21 @@ class _ViolinPlotter(_CategoricalPlotter):
                         # Draw box and whisker information
                         if self.inner.startswith("box"):
                             self.draw_box_lines(ax, violin_data,
-                                                support, density, i)
+                                                support, density, x_position)
 
                         # Draw point observations
                         elif self.inner.startswith("point"):
-                            self.draw_points(ax, violin_data, i)
+                            self.draw_points(ax, violin_data, x_position)
 
                     # Option 2b: we are drawing full nested violins
                     # -----------------------------------------------
 
                     else:
-                        grid = np.ones(self.gridsize) * (i + offsets[j])
+                        grid = np.ones(self.gridsize) * (x_position + offsets[j])
                         fill_func(support,
                                   grid - density * self.dwidth,
                                   grid + density * self.dwidth,
-                                  **kws)
+                                  **fill_kws)
 
                         # Draw the interior representation
                         if self.inner is None:
@@ -961,23 +971,23 @@ class _ViolinPlotter(_CategoricalPlotter):
                         if self.inner.startswith("box"):
                             self.draw_box_lines(ax, violin_data,
                                                 support, density,
-                                                i + offsets[j])
+                                                x_position + offsets[j])
 
                         # Draw quartile lines
                         elif self.inner.startswith("quart"):
                             self.draw_quartiles(ax, violin_data,
                                                 support, density,
-                                                i + offsets[j])
+                                                x_position + offsets[j])
 
                         # Draw stick observations
                         elif self.inner.startswith("stick"):
                             self.draw_stick_lines(ax, violin_data,
                                                   support, density,
-                                                  i + offsets[j])
+                                                  x_position + offsets[j])
 
                         # Draw point observations
                         elif self.inner.startswith("point"):
-                            self.draw_points(ax, violin_data, i + offsets[j])
+                            self.draw_points(ax, violin_data, x_position + offsets[j])
 
     def draw_single_observation(self, ax, at_group, at_quant, density):
         """Draw a line to mark a single observation."""
@@ -1031,15 +1041,16 @@ class _ViolinPlotter(_CategoricalPlotter):
         """Draw the quartiles as lines at width of density."""
         q25, q50, q75 = np.percentile(data, [25, 50, 75])
 
+        linewidth = self.linewidth
         self.draw_to_density(ax, center, q25, support, density, split,
-                             linewidth=self.linewidth,
-                             dashes=[self.linewidth * 1.5] * 2)
+                             linewidth=linewidth,
+                             dashes=[linewidth * 1.5] * 2)
         self.draw_to_density(ax, center, q50, support, density, split,
-                             linewidth=self.linewidth,
-                             dashes=[self.linewidth * 3] * 2)
+                             linewidth=linewidth,
+                             dashes=[linewidth * 3] * 2)
         self.draw_to_density(ax, center, q75, support, density, split,
-                             linewidth=self.linewidth,
-                             dashes=[self.linewidth * 1.5] * 2)
+                             linewidth=linewidth,
+                             dashes=[linewidth * 1.5] * 2)
 
     def draw_points(self, ax, data, center):
         """Draw individual observations as points at middle of the violin."""
@@ -2382,15 +2393,15 @@ boxplot.__doc__ = dedent("""\
 
 
 def violinplot(x=None, y=None, hue=None, data=None, order=None, hue_order=None,
-               bw="scott", cut=2, scale="area", scale_hue=True, gridsize=100,
+               x_positions=None, bw="scott", cut=2, scale="area", scale_hue=True, gridsize=100,
                width=.8, inner="box", split=False, dodge=True, orient=None,
-               linewidth=None, color=None, palette=None, saturation=.75,
-               ax=None, **kwargs):
+               linewidth=None, outline=True, color=None, palette=None,
+               saturation=.75, ax=None, **kwargs):
 
     plotter = _ViolinPlotter(x, y, hue, data, order, hue_order,
-                             bw, cut, scale, scale_hue, gridsize,
+                             x_positions, bw, cut, scale, scale_hue, gridsize,
                              width, inner, split, dodge, orient, linewidth,
-                             color, palette, saturation)
+                             outline, color, palette, saturation)
 
     if ax is None:
         ax = plt.gca()
